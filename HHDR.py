@@ -63,20 +63,29 @@ def main():
 
     parser.add_argument("-u", "--url", dest="url", type=str,
                         required=True, help="The url and port that the heap dump is hosted on")
+    parser.add_argument("-d", "--dump-file", dest="dump_file", type=str,
+                        required=True, help="The heap dump that the webserver is launched from")
     parser.add_argument("OUT_PATH", type=str,
                         help="The file that the json formatted results will be saved into")
 
     args = parser.parse_args()
 
     url: str = args.url
+    dump_file: str = args.dump_file
     oql_url = f"{url}/oql/"
     out_path: str = args.OUT_PATH
 
+    try:
+        requests.get(url)
+    except requests.exceptions.ConnectionError:
+        print(f"Connection Error to {url}, ensure webserver is launched and URL includes protocol")
+        exit()
+
     data = {
         "File Info": {
-            "File Name": os.path.basename(out_path),
-            "SHA256": hash_file(out_path, hashlib.sha256()),
-            "MD5": hash_file(out_path, hashlib.md5())
+            "WebServer Launched From Filename": os.path.basename(dump_file),
+            "SHA256 Hash": hash_file(dump_file, hashlib.sha256()),
+            "MD5 Hash": hash_file(dump_file, hashlib.md5())
         },
         "DataNodes": [],
         "Blocks": [],
@@ -161,9 +170,7 @@ def main():
         })
 
     write_data(data, out_path)
-
-
-# select i from StoringData i
+    print(f"Data successfully written to output file '{out_path}'")
 
 
 if __name__ == '__main__':
