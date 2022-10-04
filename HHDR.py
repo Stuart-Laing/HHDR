@@ -58,29 +58,7 @@ def write_data(data, path: str):
         json.dump(data, f, ensure_ascii=False, indent=4)
 
 
-def main():
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument("-u", "--url", dest="url", type=str,
-                        required=True, help="The url and port that the heap dump is hosted on")
-    parser.add_argument("-d", "--dump-file", dest="dump_file", type=str,
-                        required=True, help="The heap dump that the webserver is launched from")
-    parser.add_argument("OUT_PATH", type=str,
-                        help="The file that the json formatted results will be saved into")
-
-    args = parser.parse_args()
-
-    url: str = args.url
-    dump_file: str = args.dump_file
-    oql_url = f"{url}/oql/"
-    out_path: str = args.OUT_PATH
-
-    try:
-        requests.get(url)
-    except requests.exceptions.ConnectionError:
-        print(f"Connection Error to {url}, ensure webserver is launched and URL includes protocol")
-        exit()
-
+def extract_from_namenode(oql_url: str, dump_file: str):
     data = {
         "File Info": {
             "WebServer Launched From Filename": os.path.basename(dump_file),
@@ -168,6 +146,94 @@ def main():
             if directories[1][directory_index] != "{}" else "null",
             "Parent Directory ID": directories[2][directory_index]
         })
+
+    return data
+
+
+def extract_from_datanode(oql_url: str, dump_file: str):
+    data = {
+        "File Info": {
+            "WebServer Launched From Filename": os.path.basename(dump_file),
+            "SHA256 Hash": hash_file(dump_file, hashlib.sha256()),
+            "MD5 Hash": hash_file(dump_file, hashlib.md5())
+        },
+        "DataNode": {},
+        "Blocks": []
+    }
+
+    c = "org.apache.hadoop.hdfs.server.datanode.DataNode"
+    datanode_queries = [
+        (f"select x.clusterId.toString() from {c} x", False),
+        (f"select x.id.datanodeUuid.toString() from {c} x", False),
+        (f"select x.id.hostName.toString() from {c} x", False),
+        (f"select x.id.ipAddr.toString() from {c} x", False)
+    ]
+    datanode = send_queries(oql_url, datanode_queries)
+
+    data["DataNode"] = {
+        "Cluster ID": datanode[0][0],
+        "UUID": datanode[1][0],
+        "Hostname": datanode[2][0],
+        "Ip Address": datanode[3][0]
+    }
+
+    c = "org.apache.hadoop.hdfs.server.datanode.FinalizedReplica"
+    block_queries = [
+        (f"select x.blockId from {c} x", True),
+        (f"select x.numBytes from {c} x", True),
+        (f"select x.generationStamp from {c} x", True),
+        (f"select x.baseDir.path.toString() from {c} x", False)
+    ]
+    blocks = send_queries(oql_url, block_queries)
+
+    for block_index in range(0, len(blocks[0])):
+        data["Blocks"].append({
+            "Block ID": blocks[0][block_index],
+            "Number of Bytes": blocks[1][block_index],
+            "Generation Stamp": blocks[2][block_index],
+            "Full Path On Node": blocks[3][block_index]
+        })
+
+    return data
+
+
+def main():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("-u", "--url", dest="url", type=str,
+                        required=True, help="The url and port that the heap dump is hosted on")
+    parser.add_argument("-d", "--dump-file", dest="dump_file", type=str,
+                        required=True, help="The heap dump that the webserver is launched from")
+    parser.add_argument("-t", "--type", dest="type", type=str,
+                        required=True, help="The type of the heap dump. Either 'NameNode' or 'DataNode'")
+    parser.add_argument("OUT_PATH", type=str,
+                        help="The file that the json formatted results will be saved into")
+
+    args = parser.parse_args()
+
+    url: str = args.url
+    dump_file: str = args.dump_file
+    oql_url: str = f"{url}/oql/"
+    dump_type: str = args.type
+    out_path: str = args.OUT_PATH
+
+    print(f"Extracting {dump_type} data from {oql_url}")
+
+    try:
+        requests.get(url)
+    except requests.exceptions.ConnectionError:
+        print(f"Connection Error to {url}, ensure webserver is launched and URL includes protocol")
+        exit()
+
+    if dump_type.lower() == "namenode":
+        data = extract_from_namenode(oql_url, dump_file)
+
+    elif dump_type.lower() == "datanode":
+        data = extract_from_datanode(oql_url, dump_file)
+
+    else:
+        print("Type error")
+        exit()
 
     write_data(data, out_path)
     print(f"Data successfully written to output file '{out_path}'")
