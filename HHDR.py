@@ -5,7 +5,6 @@ __license__ = "GPL"
 
 """
 python 3.10
-Proved to work against Heap Dumps from Hadoop Version xxx
 """
 
 import argparse
